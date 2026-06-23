@@ -1,0 +1,57 @@
+name: Auto-merge standards docs-only PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    # Only for the sync PR branch, and only if it's labeled docs
+    if: >
+      github.event.pull_request.head.ref == 'chore/sync-engineering-standards' &&
+      contains(github.event.pull_request.labels.*.name, 'docs')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify PR is docs-only
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              { owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number, per_page: 100 }
+            );
+
+            const allowed = new Set([
+              "CODE_OF_CONDUCT.md",
+              "CONTRIBUTING.md",
+              "LICENSE",
+              "setup_gcp.md",
+              "setup_local_development.md",
+            ]);
+
+            const changed = files.map(f => f.filename);
+            const nonDocs = changed.filter(f => !allowed.has(f));
+
+            core.info(`Changed files:\n- ${changed.join("\n- ")}`);
+
+            if (nonDocs.length > 0) {
+              core.info(`Not docs-only; will not merge. Non-doc files:\n- ${nonDocs.join("\n- ")}`);
+              return;
+            }
+
+            // Merge immediately (squash). You can swap to "merge" if preferred.
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              merge_method: "squash",
+            });
+
+            core.info("Merged docs-only standards PR.");
